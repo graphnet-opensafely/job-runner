@@ -62,8 +62,7 @@ ALLOWED_IMAGES = {
     "python",
 }
 
-# DOCKER_REGISTRY = "ghcr.io/opensafely-core"
-DOCKER_REGISTRY = os.environ.get("DOCKER_REGISTRY", "")
+DOCKER_REGISTRY = os.environ.get("DOCKER_REGISTRY", "ghcr.io/opensafely-core")
 
 DATABASE_URLS = {
     "full": os.environ.get("FULL_DATABASE_URL"),
@@ -190,8 +189,11 @@ K8S_NAMESPACE = os.environ.get("K8S_NAMESPACE", "opensafely")
 # Location of the image of the job runner
 K8S_JOB_RUNNER_IMAGE = os.environ.get("K8S_JOB_RUNNER_IMAGE", "ghcr.io/opensafely-core/job-runner:latest")
 
-# Location of the image of the job runner
-K8S_STORAGE_SIZE = os.environ.get("K8S_STORAGE_SIZE", "20Gi")
+# The size of the workspace storage
+K8S_WS_STORAGE_SIZE = os.environ.get("K8S_WS_STORAGE_SIZE", "20Gi")
+
+# The size of the workspace storage
+K8S_JOB_STORAGE_SIZE = os.environ.get("K8S_JOB_STORAGE_SIZE", "20Gi")
 
 # The comma separated list of IP:PORT to be whitelisted by the execution job when `allow_database_access` is True
 K8S_EXECUTION_HOST_WHITELIST = os.environ.get("K8S_EXECUTION_HOST_WHITELIST", "")
