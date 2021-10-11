@@ -1,11 +1,8 @@
 import datetime
 from pathlib import Path
 
-import pytest
-
 from jobrunner.k8s.post import (
-    finalize,
-    copy_files
+    finalize
 )
 
 
@@ -29,7 +26,8 @@ def test_finalize(tmp_path):
     medium_privacy_metadata_dir = medium_privacy_workspace_dir / "metadata"
     
     execute_logs = "some logs"
-    output_spec = {'highly_sensitive': {'cohort': 'output/input_*.csv'}, 'moderately_sensitive': {'cohort': 'test/medium_privacy_file.txt'}}
+    # output_spec = {'highly_sensitive': {'cohort': 'output/input_*.csv'}, 'moderately_sensitive': {'cohort': 'test/medium_privacy_file.txt'}}
+    output_spec = {'output/input_*.csv': 'highly_sensitive', 'test/medium_privacy_file.txt': 'moderately_sensitive'}
     job_metadata = {'useful': 'finformation'}
     
     # generate test csv files
@@ -46,8 +44,8 @@ def test_finalize(tmp_path):
         with open(target, 'w+') as f:
             f.write(n)
     
-    job_result = finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, job_dir, job_metadata,
-                          medium_privacy_metadata_dir, medium_privacy_workspace_dir, output_spec)
+    job_result = finalize(job_dir, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, medium_privacy_metadata_dir,
+                          medium_privacy_workspace_dir, execute_logs, output_spec, job_metadata)
     
     print(job_result)
     
@@ -66,7 +64,7 @@ def test_finalize(tmp_path):
     assert not (tmp_path / f'workdir/medium_privacy/workspaces/sro-measure-int-test/unmatch/files1.txt').exists()
     assert not (tmp_path / f'workdir/medium_privacy/workspaces/sro-measure-int-test/output/input.txt').exists()
 
-    
+
 def test_finalize_empty_output(tmp_path):
     tmp_dir = Path(tmp_path)
     
@@ -104,8 +102,8 @@ def test_finalize_empty_output(tmp_path):
         with open(target, 'w+') as f:
             f.write(n)
     
-    job_result = finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, job_dir, job_metadata,
-                          medium_privacy_metadata_dir, medium_privacy_workspace_dir, output_spec)
+    job_result = finalize(job_dir, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, medium_privacy_metadata_dir,
+                          medium_privacy_workspace_dir, execute_logs, output_spec, job_metadata)
     
     print(job_result)
     

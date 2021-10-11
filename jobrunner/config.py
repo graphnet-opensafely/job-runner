@@ -62,8 +62,7 @@ ALLOWED_IMAGES = {
     "python",
 }
 
-# DOCKER_REGISTRY = "ghcr.io/opensafely-core"
-DOCKER_REGISTRY = os.environ.get("DOCKER_REGISTRY", "")
+DOCKER_REGISTRY = os.environ.get("DOCKER_REGISTRY", "ghcr.io/opensafely-core")
 
 DATABASE_URLS = {
     "full": os.environ.get("FULL_DATABASE_URL"),
@@ -179,19 +178,22 @@ EXECUTION_API = os.environ.get("EXECUTION_API", "false").lower() == "true"
 
 # k8s configurations:
 # 1 if want to run the k8s_runner in a local environment, e.g. minikube
-K8S_USE_LOCAL_CONFIG = os.environ.get("K8S_USE_LOCAL_CONFIG", "0") == 1
+GRAPHNET_K8S_USE_LOCAL_CONFIG = os.environ.get("GRAPHNET_K8S_USE_LOCAL_CONFIG", "0") == "1"
 
 # Storage class to be used, platform dependent
-K8S_STORAGE_CLASS = os.environ.get("K8S_STORAGE_CLASS", "standard")
+GRAPHNET_K8S_STORAGE_CLASS = os.environ.get("GRAPHNET_K8S_STORAGE_CLASS", "standard")
 
 # Namespace to be used
-K8S_NAMESPACE = os.environ.get("K8S_NAMESPACE", "opensafely")
+GRAPHNET_K8S_NAMESPACE = os.environ.get("GRAPHNET_K8S_NAMESPACE", "opensafely")
 
 # Location of the image of the job runner
-K8S_JOB_RUNNER_IMAGE = os.environ.get("K8S_JOB_RUNNER_IMAGE", "ghcr.io/opensafely-core/job-runner:latest")
+GRAPHNET_K8S_JOB_RUNNER_IMAGE = os.environ.get("GRAPHNET_K8S_JOB_RUNNER_IMAGE", "ghcr.io/opensafely-core/job-runner:latest")
 
-# Location of the image of the job runner
-K8S_STORAGE_SIZE = os.environ.get("K8S_STORAGE_SIZE", "20Gi")
+# The size of the workspace storage
+GRAPHNET_K8S_WS_STORAGE_SIZE = os.environ.get("GRAPHNET_K8S_WS_STORAGE_SIZE", "20Gi")
+
+# The size of the workspace storage
+GRAPHNET_K8S_JOB_STORAGE_SIZE = os.environ.get("GRAPHNET_K8S_JOB_STORAGE_SIZE", "20Gi")
 
 # The comma separated list of IP:PORT to be whitelisted by the execution job when `allow_database_access` is True
-K8S_EXECUTION_HOST_WHITELIST = os.environ.get("K8S_EXECUTION_HOST_WHITELIST", "")
+GRAPHNET_K8S_EXECUTION_HOST_WHITELIST = os.environ.get("GRAPHNET_K8S_EXECUTION_HOST_WHITELIST", "")

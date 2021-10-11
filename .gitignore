@@ -27,3 +27,4 @@ private-*
 docker/ssh/id_*
 docker/ssh/known_hosts
 /.idea/
+workdir_old

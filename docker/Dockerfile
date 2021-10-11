@@ -157,3 +157,29 @@ RUN usermod -u $USERID appuser && groupmod -g $GROUPID appuser
 
 # switch back to appuser
 USER appuser
+
+##################################################
+#
+# Graphnet image
+#
+# Copy code in, add proper metadata
+FROM job-runner-base as job-runner-graphnet
+
+# Adjust this metadata to fit project. Note that the base-docker image does set
+# some basic metadata.
+LABEL org.opencontainers.image.title="job-runner" \
+      org.opencontainers.image.description="OpenSAFELY secure job-runner service" \
+      org.opencontainers.image.source="https://github.com/opensafely-core/job-runner"
+
+# copy application code
+COPY . /app
+
+# finally, tag with build information. These will change regularly, therefore
+# we do them as the last action.
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.created=$BUILD_DATE
+ARG GITREF=unknown
+LABEL org.opencontainers.image.revision=$GITREF
+
+## changed to root in order to manage the files in the PV in k8s
+USER root

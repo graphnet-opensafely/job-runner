@@ -1,17 +1,11 @@
 from __future__ import print_function, unicode_literals, division, absolute_import
 
-import datetime
 import glob
 import json
-import time
+import shutil
 from argparse import ArgumentParser
 from pathlib import Path
-
-from jobrunner.lib import git
-import shutil
-
-from jobrunner.manage_jobs import delete_files, ActionNotRunError, ActionFailedError, MissingOutputError, read_manifest_file, update_manifest
-from jobrunner.models import State
+from typing import Mapping
 
 JOB_RESULTS_TAG = "__JobResults__:"
 
@@ -58,14 +52,24 @@ def main():
     output_spec = json.loads(args.output_spec_json)
     job_metadata = json.loads(args.job_metadata_json)
     
-    job_result = finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, job_dir, job_metadata,
-                          medium_privacy_metadata_dir, medium_privacy_workspace_dir, output_spec)
+    job_result = finalize(job_dir, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, medium_privacy_metadata_dir,
+                          medium_privacy_workspace_dir, execute_logs, output_spec, job_metadata)
     
     print(JOB_RESULTS_TAG, json.dumps(job_result).replace('\n', ''))
 
 
-def finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, high_privacy_metadata_dir, high_privacy_workspace_dir, job_dir, job_metadata,
-             medium_privacy_metadata_dir, medium_privacy_workspace_dir, output_spec):
+def finalize(
+        job_dir,
+        high_privacy_action_log_path,
+        high_privacy_log_dir,
+        high_privacy_metadata_dir,
+        high_privacy_workspace_dir,
+        medium_privacy_metadata_dir,
+        medium_privacy_workspace_dir,
+        execute_logs: str,
+        output_spec: Mapping[str, str],
+        job_metadata: Mapping[str, object]
+):
     job_dir = Path(job_dir)
     high_privacy_workspace_dir = Path(high_privacy_workspace_dir)
     high_privacy_metadata_dir = Path(high_privacy_metadata_dir)
@@ -80,6 +84,7 @@ def finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, h
         'unmatched': unmatched_patterns,
     }
     
+    job_metadata = dict(job_metadata)
     job_metadata['outputs'] = job_result['outputs']
     job_metadata['status_message'] = job_result['unmatched']
     
@@ -111,7 +116,7 @@ def finalize(execute_logs, high_privacy_action_log_path, high_privacy_log_dir, h
     return job_result
 
 
-def find_matching_outputs(job_dir, output_spec):
+def find_matching_outputs_old(job_dir: str, output_spec: Mapping[str, Mapping[str, str]]):
     """
     Returns a dict mapping output filenames to their privacy level, plus a list
     of any patterns that had no matches at all
@@ -132,6 +137,28 @@ def find_matching_outputs(job_dir, output_spec):
                 unmatched_patterns.append(pattern)
             for filename in filenames:
                 outputs[filename] = privacy_level
+    return outputs, unmatched_patterns
+
+
+def find_matching_outputs(job_dir: Path, output_spec: Mapping[str, str]):
+    """
+    Returns a dict mapping output filenames to their privacy level, plus a list
+    of any patterns that had no matches at all
+    """
+    all_patterns = []
+    for pattern, privacy_level in output_spec.items():
+        all_patterns.append(pattern)
+    
+    all_matches = {pattern: [Path(full_path).relative_to(job_dir) for full_path in glob.glob(f"{job_dir}/{pattern}")] for pattern in all_patterns}
+    
+    unmatched_patterns = []
+    outputs = {}
+    for pattern, privacy_level in output_spec.items():
+        filenames = all_matches[pattern]
+        if not filenames:
+            unmatched_patterns.append(pattern)
+        for filename in filenames:
+            outputs[filename] = privacy_level
     return outputs, unmatched_patterns
 
 
