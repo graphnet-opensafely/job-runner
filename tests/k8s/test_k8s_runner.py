@@ -5,9 +5,27 @@ import time
 
 import pytest
 
+from jobrunner import config
 from jobrunner.job_executor import *
-from jobrunner.k8s.k8s_runner import *
-from jobrunner.job_executor import *
+from jobrunner.k8s.k8s_runner import (
+    init_k8s_config,
+    create_opensafely_job,
+    convert_k8s_name,
+    create_k8s_job,
+    read_log,
+    create_pv,
+    create_pvc,
+    create_namespace,
+    create_network_policy,
+    K8SJobStatus,
+    read_finalize_output,
+    read_image_id,
+    JOB_CONTAINER_NAME,
+    delete_work_files,
+    WORK_DIR,
+    await_job_status,
+    K8sJobAPI,
+)
 
 
 @pytest.fixture(params=[
@@ -66,88 +84,11 @@ def list_files_in_volume(namespace, pvc_name, path):
 
 @pytest.mark.slow_test
 @pytest.mark.needs_local_k8s
-def test_generate_cohort(monkeypatch):
-    namespace = "opensafely-test"
-    
-    monkeypatch.setattr("jobrunner.config.K8S_USE_LOCAL_CONFIG", 1)
-    monkeypatch.setattr("jobrunner.config.K8S_STORAGE_CLASS", "standard")
-    monkeypatch.setattr("jobrunner.config.K8S_NAMESPACE", namespace)
-    monkeypatch.setattr("jobrunner.config.K8S_JOB_RUNNER_IMAGE", "opensafely-job-runner:latest")
-    monkeypatch.setattr("jobrunner.config.K8S_WS_STORAGE_SIZE", "100M")
-    monkeypatch.setattr("jobrunner.config.K8S_JOB_STORAGE_SIZE", "100M")
-    monkeypatch.setattr("jobrunner.config.K8S_EXECUTION_HOST_WHITELIST", "127.0.0.1:1433")
-    
-    init_k8s_config()
-    
-    import configparser
-    config = configparser.RawConfigParser()
-    config.read('private_test_config.ini')
-    
-    workspace_name = "test_workspace"
-    opensafely_job_id = "test_job_id"
-    opensafely_job_name = "test_job_name"
-    repo_url = "https://github.com/graphnet-opensafely/opensafely-SRO-Measures.git"
-    commit_sha = "8cfdfbaadbc63c7b5023609731f4a591e3e279fa"
-    private_repo_access_token = config.get('git', 'PRIVATE_REPO_ACCESS_TOKEN')
-    inputs = ""
-    output_spec = {'output/input_*.csv': 'highly_sensitive'}
-    
-    allow_network_access = True
-    execute_job_image = 'ghcr.io/opensafely-core/cohortextractor:latest'
-    execute_job_command = None
-    execute_job_arg = ['generate_cohort', '--study-definition', 'study_definition', '--index-date-range', '2021-01-01 to 2021-02-01 by month', '--output-dir=output',
-                       '--output-dir=output', '--expectations-population=1']
-    execute_job_env = {'OPENSAFELY_BACKEND': 'graphnet', 'DATABASE_URL': 'mssql://dummy_user:dummy_password@127.0.0.1:1433/dummy_db'}
-    
-    jobs, work_pv, work_pvc, job_pv, _ = create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name, repo_url, private_repo_access_token, commit_sha,
-                                                               inputs,
-                                                               allow_network_access, execute_job_image, execute_job_command, execute_job_arg, execute_job_env,
-                                                               output_spec)
-    
-    for job_name in jobs:
-        status = await_job_status(job_name, namespace)
-        log_k8s_job(job_name, namespace)
-        assert status == K8SJobStatus.SUCCEEDED
-    
-    job_status = read_finalize_output(opensafely_job_name, opensafely_job_id, namespace)
-    print(job_status)
-    assert job_status == {'outputs': {'output/input_2021-01-01.csv': 'highly_sensitive', 'output/input_2021-02-01.csv': 'highly_sensitive'}, 'unmatched': []}
-    
-    execute_job_name = jobs[1]
-    image_id = read_image_id(execute_job_name, JOB_CONTAINER_NAME, namespace)
-    print(image_id)
-    assert image_id is not None
-    
-    result = list_files_in_volume(namespace, work_pvc, WORK_DIR)
-    for r in result: print(r)
-    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-01-01.csv' in result
-    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-02-01.csv' in result
-    
-    delete_job_name = delete_work_files(workspace_name, Privacy.HIGH, ['output/input_2021-01-01.csv'], work_pvc, namespace)
-    status = await_job_status(delete_job_name, namespace)
-    log_k8s_job(delete_job_name, namespace)
-    assert status == K8SJobStatus.SUCCEEDED
-    print()
-    
-    result = list_files_in_volume(namespace, work_pvc, WORK_DIR)
-    for r in result: print(r)
-    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-01-01.csv' not in result
-    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-02-01.csv' in result
-    
-    # clean up
-    delete_namespace(namespace)
-    
-    delete_persistent_volume(work_pv)
-    delete_persistent_volume(job_pv)
-
-
-@pytest.mark.slow_test
-@pytest.mark.needs_local_k8s
 def test_generate_cohort_with_JobAPI(monkeypatch):
-    # TODO
     namespace = "opensafely-test"
     
     monkeypatch.setattr("jobrunner.config.K8S_USE_LOCAL_CONFIG", 1)
+    monkeypatch.setattr("jobrunner.config.DEBUG", 1)
     monkeypatch.setattr("jobrunner.config.K8S_STORAGE_CLASS", "standard")
     monkeypatch.setattr("jobrunner.config.K8S_NAMESPACE", namespace)
     monkeypatch.setattr("jobrunner.config.K8S_JOB_RUNNER_IMAGE", "opensafely-job-runner:latest")
@@ -156,21 +97,19 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     monkeypatch.setattr("jobrunner.config.K8S_EXECUTION_HOST_WHITELIST", "127.0.0.1:1433")
     
     import configparser
-    config = configparser.RawConfigParser()
-    config.read('private_test_config.ini')
+    private_config = configparser.RawConfigParser()
+    private_config.read('private_test_config.ini')
     
     workspace_name = "test_workspace"
     opensafely_job_id = "test_job_id"
-    opensafely_job_name = "test_job_name"
     repo_url = "https://github.com/graphnet-opensafely/opensafely-SRO-Measures.git"
     commit_sha = "8cfdfbaadbc63c7b5023609731f4a591e3e279fa"
-    private_repo_access_token = config.get('git', 'PRIVATE_REPO_ACCESS_TOKEN')
+    config.PRIVATE_REPO_ACCESS_TOKEN = private_config.get('git', 'PRIVATE_REPO_ACCESS_TOKEN')
     inputs = []
     output_spec = {'output/input_*.csv': 'highly_sensitive'}
     
     allow_network_access = True
     execute_job_image = 'ghcr.io/opensafely-core/cohortextractor:latest'
-    execute_job_command = None
     execute_job_arg = ['generate_cohort', '--study-definition', 'study_definition', '--index-date-range', '2021-01-01 to 2021-02-01 by month', '--output-dir=output',
                        '--output-dir=output', '--expectations-population=1']
     execute_job_env = {'OPENSAFELY_BACKEND': 'graphnet', 'DATABASE_URL': 'mssql://dummy_user:dummy_password@127.0.0.1:1433/dummy_db'}
@@ -213,28 +152,31 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     job_api.prepare(job)
     status = job_api.get_status(job)
     assert status.state == ExecutorState.PREPARING
-    while job_api.get_status(job) == ExecutorState.PREPARING:
+    while True:
+        status = job_api.get_status(job)
+        if status.state != ExecutorState.PREPARING:
+            break
         time.sleep(1)
-    
-    status = job_api.get_status(job)
     assert status.state == ExecutorState.PREPARED
     
     job_api.execute(job)
     status = job_api.get_status(job)
     assert status.state == ExecutorState.EXECUTING
-    while job_api.get_status(job) == ExecutorState.EXECUTING:
+    while True:
+        status = job_api.get_status(job)
+        if status.state != ExecutorState.EXECUTING:
+            break
         time.sleep(1)
-    
-    status = job_api.get_status(job)
     assert status.state == ExecutorState.EXECUTED
     
     job_api.finalize(job)
     status = job_api.get_status(job)
     assert status.state == ExecutorState.FINALIZING
-    while job_api.get_status(job) == ExecutorState.FINALIZING:
+    while True:
+        status = job_api.get_status(job)
+        if status.state != ExecutorState.FINALIZING:
+            break
         time.sleep(1)
-    
-    status = job_api.get_status(job)
     assert status.state == ExecutorState.FINALIZED
     
     results = job_api.get_results(job)
@@ -244,8 +186,92 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     
     job_api.cleanup(job)
     
-    # TODO test if job, pv, pvc are all deleted
-    pass
+    # clean up
+    delete_namespace(namespace)
+    
+    work_pv = K8sJobAPI._get_work_pv_name(job)
+    job_pv = K8sJobAPI._get_job_pv_name(job)
+    delete_persistent_volume(work_pv)
+    delete_persistent_volume(job_pv)
+
+
+@pytest.mark.slow_test
+@pytest.mark.needs_local_k8s
+def test_generate_cohort(monkeypatch):
+    namespace = "opensafely-test"
+    
+    monkeypatch.setattr("jobrunner.config.K8S_USE_LOCAL_CONFIG", 1)
+    monkeypatch.setattr("jobrunner.config.K8S_STORAGE_CLASS", "standard")
+    monkeypatch.setattr("jobrunner.config.K8S_NAMESPACE", namespace)
+    monkeypatch.setattr("jobrunner.config.K8S_JOB_RUNNER_IMAGE", "opensafely-job-runner:latest")
+    monkeypatch.setattr("jobrunner.config.K8S_WS_STORAGE_SIZE", "100M")
+    monkeypatch.setattr("jobrunner.config.K8S_JOB_STORAGE_SIZE", "100M")
+    monkeypatch.setattr("jobrunner.config.K8S_EXECUTION_HOST_WHITELIST", "127.0.0.1:1433")
+    
+    init_k8s_config()
+    
+    import configparser
+    private_config = configparser.RawConfigParser()
+    private_config.read('private_test_config.ini')
+    
+    workspace_name = "test_workspace"
+    opensafely_job_id = "test_job_id"
+    opensafely_job_name = "test_job_name"
+    repo_url = "https://github.com/graphnet-opensafely/opensafely-SRO-Measures.git"
+    commit_sha = "8cfdfbaadbc63c7b5023609731f4a591e3e279fa"
+    private_repo_access_token = private_config.get('git', 'PRIVATE_REPO_ACCESS_TOKEN')
+    inputs = ""
+    output_spec = {'output/input_*.csv': 'highly_sensitive'}
+    
+    allow_network_access = True
+    execute_job_image = 'ghcr.io/opensafely-core/cohortextractor:latest'
+    execute_job_command = None
+    execute_job_arg = ['generate_cohort', '--study-definition', 'study_definition', '--index-date-range', '2021-01-01 to 2021-02-01 by month', '--output-dir=output',
+                       '--output-dir=output', '--expectations-population=1']
+    execute_job_env = {'OPENSAFELY_BACKEND': 'graphnet', 'DATABASE_URL': 'mssql://dummy_user:dummy_password@127.0.0.1:1433/dummy_db'}
+    
+    jobs, work_pv, work_pvc, job_pv, _ = create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name, repo_url, private_repo_access_token, commit_sha,
+                                                               inputs,
+                                                               allow_network_access, execute_job_image, execute_job_command, execute_job_arg, execute_job_env,
+                                                               output_spec)
+    
+    for job_name in jobs:
+        status = await_job_status(job_name, namespace)
+        log_k8s_job(job_name, namespace)
+        assert status == K8SJobStatus.SUCCEEDED
+    
+    job_status = read_finalize_output(opensafely_job_name, opensafely_job_id, namespace)
+    print(job_status)
+    assert job_status == {'outputs': {'output/input_2021-01-01.csv': 'highly_sensitive', 'output/input_2021-02-01.csv': 'highly_sensitive'}, 'unmatched': []}
+    
+    execute_job_name = jobs[1]
+    image_id = read_image_id(execute_job_name, JOB_CONTAINER_NAME, namespace)
+    print(image_id)
+    assert image_id is not None
+    
+    result = list_files_in_volume(namespace, work_pvc, WORK_DIR)
+    for r in result:
+        print(r)
+    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-01-01.csv' in result
+    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-02-01.csv' in result
+    
+    delete_job_name = delete_work_files(workspace_name, Privacy.HIGH, ['output/input_2021-01-01.csv'], work_pvc, namespace)
+    status = await_job_status(delete_job_name, namespace)
+    log_k8s_job(delete_job_name, namespace)
+    assert status == K8SJobStatus.SUCCEEDED
+    print()
+    
+    result = list_files_in_volume(namespace, work_pvc, WORK_DIR)
+    for r in result:
+        print(r)
+    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-01-01.csv' not in result
+    assert f'/workdir/high_privacy/workspaces/{workspace_name}/output/input_2021-02-01.csv' in result
+    
+    # clean up
+    delete_namespace(namespace)
+    
+    delete_persistent_volume(work_pv)
+    delete_persistent_volume(job_pv)
 
 
 @pytest.mark.slow_test
@@ -280,9 +306,9 @@ def test_job_env(monkeypatch):
     logs = read_log(job, namespace)
     print(logs)
     assert status == K8SJobStatus.SUCCEEDED
-    log = list(logs.values())[0]
+    logs = list(logs.values())[0]
     for k, v in env.items():
-        assert f"{k}={v}" in log
+        assert f"{k}={v}" in logs
     
     # clean up
     delete_namespace(namespace)

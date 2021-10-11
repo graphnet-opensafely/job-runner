@@ -10,8 +10,11 @@ import time
 import dataclasses
 
 from pathlib import Path
+from typing import Tuple
+
 from kubernetes import client, config as k8s_config
 
+from jobrunner import config
 from jobrunner.job_executor import *
 from jobrunner.k8s.post import JOB_RESULTS_TAG
 
@@ -44,11 +47,8 @@ class K8sJobAPI(JobAPI):
             status = self.get_status(job)
             if status.state != ExecutorState.UNKNOWN:
                 return JobStatus(status.state, "invalid state")
-            
-            workspace_name = job.workspace
-            opensafely_job_id = job.id
-            
-            work_pv = convert_k8s_name(workspace_name, "pv")
+
+            work_pv = self._get_work_pv_name(job)
             job_pv = self._get_job_pv_name(job)
             
             # 3. Check the resources are available to prepare the job. If not, return the UNKNOWN state with an appropriate message.
@@ -70,7 +70,7 @@ class K8sJobAPI(JobAPI):
             create_pvc(job_pv, job_pvc, storage_class, namespace, job_pv_size)
             
             commit_sha = job.study.commit
-            inputs = job.inputs
+            inputs = ";".join(job.inputs)
             repo_url = job.study.git_repo_url
             
             # 5. Launch a prepare task asynchronously. If launched successfully, return the PREPARING state. If not, return an ERROR state with message.
@@ -79,9 +79,12 @@ class K8sJobAPI(JobAPI):
             
             return JobStatus(ExecutorState.PREPARING)
         except Exception as e:
-            log.exception(str(e))
-            return JobStatus(ExecutorState.ERROR, str(e))
-    
+            if config.DEBUG == 1:
+                raise e
+            else:
+                log.exception(str(e))
+                return JobStatus(ExecutorState.ERROR, str(e))
+
     def execute(self, job: JobDefinition) -> JobStatus:
         try:
             # 1. Check the job is in the PREPARED state. If not, return its current state with a message.
@@ -113,9 +116,12 @@ class K8sJobAPI(JobAPI):
             
             return JobStatus(ExecutorState.EXECUTING)
         except Exception as e:
-            log.exception(str(e))
-            return JobStatus(ExecutorState.ERROR, str(e))
-    
+            if config.DEBUG == 1:
+                raise e
+            else:
+                log.exception(str(e))
+                return JobStatus(ExecutorState.ERROR, str(e))
+
     def finalize(self, job: JobDefinition) -> JobStatus:
         try:
             # 1. Check the job is in the EXECUTED state. If not, return its current state with a message.
@@ -142,8 +148,11 @@ class K8sJobAPI(JobAPI):
             finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, work_pvc, workspace_name, job)
             return JobStatus(ExecutorState.FINALIZING)
         except Exception as e:
-            log.exception(str(e))
-            return JobStatus(ExecutorState.ERROR, str(e))
+            if config.DEBUG == 1:
+                raise e
+            else:
+                log.exception(str(e))
+                return JobStatus(ExecutorState.ERROR, str(e))
     
     def get_status(self, job: JobDefinition) -> JobStatus:
         namespace = config.K8S_NAMESPACE
@@ -271,6 +280,10 @@ class K8sJobAPI(JobAPI):
         except:  # already deleted
             pass
         return jobs_deleted
+    
+    @staticmethod
+    def _get_work_pv_name(job):
+        return convert_k8s_name(job.workspace, "pv")
     
     @staticmethod
     def _get_job_pv_name(job):
@@ -634,7 +647,8 @@ def create_k8s_job(
         env: Mapping[str, str],
         storages: List[Tuple[str, str, bool]],
         pod_labels: Mapping[str, str], depends_on: str = None,
-        image_pull_policy: str = "IfNotPresent"
+        image_pull_policy: str = "IfNotPresent",
+        block_until_created=True
 ):
     """
     Create k8s job dynamically. Do nothing if job with the same job_name already exist.
@@ -746,6 +760,11 @@ def create_k8s_job(
             )
     )
     batch_v1.create_namespaced_job(body=job, namespace=namespace)
+    
+    if block_until_created:
+        while read_k8s_job_status(job_name, namespace) == K8SJobStatus.UNKNOWN:
+            time.sleep(.5)
+    
     print(f"job {job_name} created")
 
 
