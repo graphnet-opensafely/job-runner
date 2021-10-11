@@ -24,7 +24,7 @@ from jobrunner.k8s.k8s_runner import (
     delete_work_files,
     WORK_DIR,
     await_job_status,
-    K8sJobAPI,
+    K8SJobAPI,
 )
 
 
@@ -145,7 +145,7 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
             allow_network_access
     )
     
-    job_api = K8sJobAPI()
+    job_api = K8SJobAPI()
     status = job_api.get_status(job)
     assert status.state == ExecutorState.UNKNOWN
     
@@ -189,8 +189,8 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     # clean up
     delete_namespace(namespace)
     
-    work_pv = K8sJobAPI._get_work_pv_name(job)
-    job_pv = K8sJobAPI._get_job_pv_name(job)
+    work_pv = K8SJobAPI._get_work_pv_name(job)
+    job_pv = K8SJobAPI._get_job_pv_name(job)
     delete_persistent_volume(work_pv)
     delete_persistent_volume(job_pv)
 

@@ -178,7 +178,7 @@ EXECUTION_API = os.environ.get("EXECUTION_API", "false").lower() == "true"
 
 # k8s configurations:
 # 1 if want to run the k8s_runner in a local environment, e.g. minikube
-K8S_USE_LOCAL_CONFIG = os.environ.get("K8S_USE_LOCAL_CONFIG", "0") == 1
+K8S_USE_LOCAL_CONFIG = os.environ.get("K8S_USE_LOCAL_CONFIG", "0") == "1"
 
 # Storage class to be used, platform dependent
 K8S_STORAGE_CLASS = os.environ.get("K8S_STORAGE_CLASS", "standard")

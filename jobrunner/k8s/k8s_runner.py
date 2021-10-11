@@ -29,7 +29,7 @@ WORK_DIR = "/workdir"
 JOB_DIR = "/workspace"
 
 
-class K8sJobAPI(JobAPI):
+class K8SJobAPI(JobAPI):
     def __init__(self):
         init_k8s_config()
     

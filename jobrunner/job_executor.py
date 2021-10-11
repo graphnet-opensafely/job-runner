@@ -271,8 +271,10 @@ class NullWorkspaceAPI:
 
 
 def get_job_api():
-    return NullJobAPI()
+    from jobrunner.k8s.k8s_runner import K8SJobAPI
+    return K8SJobAPI()
 
 
 def get_workspace_api():
-    return NullWorkspaceAPI()
+    from jobrunner.k8s.k8s_runner import K8SWorkspaceAPI
+    return K8SWorkspaceAPI()
