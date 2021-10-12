@@ -175,6 +175,7 @@ STATS_POLL_INTERVAL = float(os.environ.get("STATS_POLL_INTERVAL", "10"))
 # feature flag to enable new API abstraction
 EXECUTION_API = os.environ.get("EXECUTION_API", "false").lower() == "true"
 
+EXECUTOR = os.environ.get("EXECUTOR", "jobrunner.executors.local:LocalDockerJobAPI")
 
 # k8s configurations:
 # 1 if want to run the k8s_runner in a local environment, e.g. minikube

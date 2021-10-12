@@ -54,6 +54,7 @@ from jobrunner.lib.string_utils import tabulate
 from jobrunner.lib.subprocess_utils import subprocess_run
 from jobrunner.manage_jobs import METADATA_DIR
 from jobrunner.models import Job, JobRequest, State, StatusCode
+from jobrunner.project import UnknownActionError, get_all_actions
 from jobrunner.reusable_actions import (
     ReusableActionError,
     resolve_reusable_action_references,
@@ -224,7 +225,9 @@ def create_and_run_jobs(
     config.MEDIUM_PRIVACY_WORKSPACES_DIR = None
 
     # This is a temporary migration step to avoid unnecessarily re-running actions as we migrate away from the manifest.
-    manifest_to_database_migration.migrate_one(project_dir, write_medium_privacy_manifest=False, batch_size=1000)
+    manifest_to_database_migration.migrate_one(
+        project_dir, write_medium_privacy_manifest=False, batch_size=1000, log=False
+    )
 
     try:
         job_request, jobs = create_job_request_and_jobs(
@@ -416,7 +419,17 @@ def create_job_request_and_jobs(project_dir, actions, force_run_dependencies):
         job for job in latest_jobs if all_output_files_present(project_dir, job)
     ]
 
-    new_jobs = get_new_jobs_to_run(job_request, project, latest_jobs_with_files_present)
+    try:
+        if not actions:
+            raise UnknownActionError("At least one action must be supplied")
+        new_jobs = get_new_jobs_to_run(
+            job_request, project, latest_jobs_with_files_present
+        )
+    except UnknownActionError as e:
+        # Annotate the exception with a list of valid action names so we can
+        # show them to the user
+        e.valid_actions = [RUN_ALL_COMMAND] + get_all_actions(project)
+        raise e
     assert_new_jobs_created(new_jobs, latest_jobs_with_files_present)
     resolve_reusable_action_references(new_jobs)
     insert_into_database(job_request, new_jobs)
