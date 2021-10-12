@@ -15,8 +15,9 @@ from typing import Tuple
 from kubernetes import client, config as k8s_config
 
 from jobrunner import config
+from jobrunner.executors.graphnet import config as graphnet_config
 from jobrunner.job_executor import *
-from jobrunner.k8s.post import JOB_RESULTS_TAG
+from jobrunner.executors.graphnet.post import JOB_RESULTS_TAG
 
 batch_v1 = client.BatchV1Api()
 core_v1 = client.CoreV1Api()
@@ -47,18 +48,18 @@ class K8SJobAPI(JobAPI):
             status = self.get_status(job)
             if status.state != ExecutorState.UNKNOWN:
                 return JobStatus(status.state, "invalid state")
-
+            
             work_pv = self._get_work_pv_name(job)
             job_pv = self._get_job_pv_name(job)
             
             # 3. Check the resources are available to prepare the job. If not, return the UNKNOWN state with an appropriate message.
-            storage_class = config.GRAPHNET_K8S_STORAGE_CLASS
-            ws_pv_size = config.GRAPHNET_K8S_WS_STORAGE_SIZE
-            job_pv_size = config.GRAPHNET_K8S_JOB_STORAGE_SIZE
+            storage_class = graphnet_config.GRAPHNET_K8S_STORAGE_CLASS
+            ws_pv_size = graphnet_config.GRAPHNET_K8S_WS_STORAGE_SIZE
+            job_pv_size = graphnet_config.GRAPHNET_K8S_JOB_STORAGE_SIZE
             create_pv(work_pv, storage_class, ws_pv_size)
             create_pv(job_pv, storage_class, job_pv_size)
             
-            namespace = config.GRAPHNET_K8S_NAMESPACE
+            namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
             create_namespace(namespace)
             
             work_pvc = self._get_work_pvc_name(job)
@@ -84,7 +85,7 @@ class K8SJobAPI(JobAPI):
             else:
                 log.exception(str(e))
                 return JobStatus(ExecutorState.ERROR, str(e))
-
+    
     def execute(self, job: JobDefinition) -> JobStatus:
         try:
             # 1. Check the job is in the PREPARED state. If not, return its current state with a message.
@@ -101,11 +102,15 @@ class K8SJobAPI(JobAPI):
             execute_job_name = self._get_execute_job_name(job)
             execute_job_arg = [job.action] + job.args
             execute_job_command = None
-            execute_job_env = job.env  # TODO do we need to add DB URL for cohortextractor?
+            execute_job_env = dict(job.env)
             execute_job_image = job.image
             
-            namespace = config.GRAPHNET_K8S_NAMESPACE
-            whitelist = config.GRAPHNET_K8S_EXECUTION_HOST_WHITELIST
+            # add DB URL for cohortextractor
+            if job.allow_database_access:
+                execute_job_env['DATABASE_URL'] = config.DATABASE_URLS['full']
+            
+            namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
+            whitelist = graphnet_config.GRAPHNET_K8S_EXECUTION_HOST_WHITELIST
             if job.allow_database_access and len(whitelist.strip()) > 0:
                 network_labels = create_network_policy(namespace, [ip_port.split(":") for ip_port in whitelist.split(",")])  # allow whitelist
             else:
@@ -121,7 +126,7 @@ class K8SJobAPI(JobAPI):
             else:
                 log.exception(str(e))
                 return JobStatus(ExecutorState.ERROR, str(e))
-
+    
     def finalize(self, job: JobDefinition) -> JobStatus:
         try:
             # 1. Check the job is in the EXECUTED state. If not, return its current state with a message.
@@ -155,7 +160,7 @@ class K8SJobAPI(JobAPI):
                 return JobStatus(ExecutorState.ERROR, str(e))
     
     def get_status(self, job: JobDefinition) -> JobStatus:
-        namespace = config.GRAPHNET_K8S_NAMESPACE
+        namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
         
         prepare_job_name = self._get_prepare_job_name(job)
         prepare_state = read_k8s_job_status(prepare_job_name, namespace)
@@ -212,7 +217,7 @@ class K8SJobAPI(JobAPI):
     
     def cleanup(self, job: JobDefinition) -> JobStatus:
         # 1. Initiate the cleanup, do not wait for it to complete.
-        namespace = config.GRAPHNET_K8S_NAMESPACE
+        namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
         
         self._delete_all_jobs(job)
         
@@ -233,7 +238,7 @@ class K8SJobAPI(JobAPI):
         return JobStatus(ExecutorState.UNKNOWN)
     
     def get_results(self, job: JobDefinition) -> JobResults:
-        namespace = config.GRAPHNET_K8S_NAMESPACE
+        namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
         
         job_output = read_finalize_output(self._get_opensafely_job_name(job), job.id, namespace)
         finalize_status = read_k8s_job_status(self._get_finalize_job_name(job), namespace)
@@ -258,7 +263,7 @@ class K8SJobAPI(JobAPI):
         )
     
     def _delete_all_jobs(self, job):
-        namespace = config.GRAPHNET_K8S_NAMESPACE
+        namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
         
         jobs_deleted = []
         prepare_job_name = self._get_prepare_job_name(job)
@@ -317,7 +322,7 @@ class K8SWorkspaceAPI(WorkspaceAPI):
     
     def delete_files(self, workspace: str, privacy: Privacy, paths: [str]):
         try:
-            namespace = config.GRAPHNET_K8S_NAMESPACE
+            namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
             work_pvc = convert_k8s_name(workspace, "pvc")
             
             job_name = delete_work_files(workspace, privacy, paths, work_pvc, namespace)
@@ -330,7 +335,7 @@ class K8SWorkspaceAPI(WorkspaceAPI):
 
 def init_k8s_config():
     global batch_v1, core_v1, networking_v1
-    if config.GRAPHNET_K8S_USE_LOCAL_CONFIG:
+    if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG:
         # for testing, e.g. run on a local minikube
         k8s_config.load_kube_config()
     else:
@@ -359,13 +364,13 @@ def create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name
     job_pv = convert_k8s_name(opensafely_job_id, "pv")
     job_pvc = convert_k8s_name(opensafely_job_id, "pvc")
     
-    storage_class = config.GRAPHNET_K8S_STORAGE_CLASS
-    ws_pv_size = config.GRAPHNET_K8S_WS_STORAGE_SIZE
-    job_pv_size = config.GRAPHNET_K8S_JOB_STORAGE_SIZE
+    storage_class = graphnet_config.GRAPHNET_K8S_STORAGE_CLASS
+    ws_pv_size = graphnet_config.GRAPHNET_K8S_WS_STORAGE_SIZE
+    job_pv_size = graphnet_config.GRAPHNET_K8S_JOB_STORAGE_SIZE
     create_pv(work_pv, storage_class, ws_pv_size)
     create_pv(job_pv, storage_class, job_pv_size)
     
-    namespace = config.GRAPHNET_K8S_NAMESPACE
+    namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
     create_namespace(namespace)
     
     create_pvc(work_pv, work_pvc, storage_class, namespace, ws_pv_size)
@@ -376,7 +381,7 @@ def create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name
     prepare_job_name = prepare(prepare_job_name, commit_sha, inputs, job_pvc, private_repo_access_token, repo_url, work_pvc)
     
     # Execute
-    whitelist = config.GRAPHNET_K8S_EXECUTION_HOST_WHITELIST
+    whitelist = graphnet_config.GRAPHNET_K8S_EXECUTION_HOST_WHITELIST
     whitelist_network_labels = create_network_policy(namespace, [ip_port.split(":") for ip_port in whitelist.split(",")] if len(whitelist.strip()) > 0 else [])
     deny_all_network_labels = create_network_policy(namespace, [])
     execute_job_name = convert_k8s_name(opensafely_job_name, "execute", additional_hash=opensafely_job_id)
@@ -399,16 +404,16 @@ def create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name
 
 def prepare(prepare_job_name, commit_sha, inputs, job_pvc, private_repo_access_token, repo_url, work_pvc):
     repos_dir = WORK_DIR + "/repos"
-    command = ['python', '-m', 'jobrunner.k8s.pre']
+    command = ['python', '-m', 'jobrunner.executors.graphnet.pre']
     args = [repo_url, commit_sha, repos_dir, JOB_DIR, inputs]
     env = {'PRIVATE_REPO_ACCESS_TOKEN': private_repo_access_token}
     storages = [
         (work_pvc, WORK_DIR, False),
         (job_pvc, JOB_DIR, True),
     ]
-    image_pull_policy = "Never" if config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
-    namespace = config.GRAPHNET_K8S_NAMESPACE
-    jobrunner_image = config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
+    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
+    namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
+    jobrunner_image = graphnet_config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
     create_k8s_job(prepare_job_name, namespace, jobrunner_image, command, args, env, storages, {}, image_pull_policy=image_pull_policy)
     return prepare_job_name
 
@@ -420,8 +425,8 @@ def execute(execute_job_name, execute_job_arg, execute_job_command, execute_job_
         (job_pvc, JOB_DIR, True),
     ]
     env = execute_job_env
-    image_pull_policy = "Never" if config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
-    namespace = config.GRAPHNET_K8S_NAMESPACE
+    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
+    namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
     create_k8s_job(execute_job_name, namespace, execute_job_image, command, args, env, storages, network_labels, depends_on=depends_on,
                    image_pull_policy=image_pull_policy)
     return execute_job_name
@@ -431,7 +436,7 @@ def finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, 
     # read the log of the execute job
     pod_name = None
     container_log = None
-    namespace = config.GRAPHNET_K8S_NAMESPACE
+    namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
     logs = read_log(execute_job_name, namespace)
     for (pod_name, container_name), container_log in logs.items():
         if container_name == JOB_CONTAINER_NAME:
@@ -471,7 +476,7 @@ def finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, 
     
     job_metadata_json = json.dumps(job_metadata)
     
-    command = ['python', '-m', 'jobrunner.k8s.post']
+    command = ['python', '-m', 'jobrunner.executors.graphnet.post']
     args = [JOB_DIR, high_privacy_workspace_dir, high_privacy_metadata_dir, high_privacy_log_dir, high_privacy_action_log_path, medium_privacy_workspace_dir,
             medium_privacy_metadata_dir, execute_logs, output_spec_json, job_metadata_json]
     args = [str(a) for a in args]
@@ -480,8 +485,8 @@ def finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, 
         (work_pvc, WORK_DIR, False),
         (job_pvc, JOB_DIR, True),
     ]
-    image_pull_policy = "Never" if config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
-    jobrunner_image = config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
+    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
+    jobrunner_image = graphnet_config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
     create_k8s_job(finalize_job_name, namespace, jobrunner_image, command, args, env, storages, {}, image_pull_policy=image_pull_policy)
     
     return finalize_job_name
@@ -500,7 +505,7 @@ def delete_work_files(workspace, privacy, paths, work_pvc, namespace):
         # pvc, path, is_control
         (work_pvc, WORK_DIR, False)
     ]
-    image_pull_policy = "Never" if config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
+    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
     create_k8s_job(job_name, namespace, image, command, args, {}, storage, dict(), image_pull_policy=image_pull_policy)
     return job_name
 
@@ -596,7 +601,7 @@ def create_pv(pv_name: str, storage_class: str, size: str):
                     access_modes=["ReadWriteOnce"],
                     
                     # for testing:
-                    host_path={"path": f"/tmp/{str(int(time.time() * 10 ** 6))}"} if config.GRAPHNET_K8S_USE_LOCAL_CONFIG else None
+                    host_path={"path": f"/tmp/{str(int(time.time() * 10 ** 6))}"} if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else None
             )
     )
     core_v1.create_persistent_volume(body=pv)
