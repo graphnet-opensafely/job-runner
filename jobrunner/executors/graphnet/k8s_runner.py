@@ -61,8 +61,11 @@ class K8SJobAPI(JobAPI):
             
             # 2. Check the job is currently in UNKNOWN state. If not return its current state with a message indicated invalid state.
             status = self.get_status(job)
+            
+            if status.state in [ExecutorState.PREPARING, ExecutorState.PREPARED]:
+                return JobStatus(status.state, f"already in state {status.state}")
             if status.state != ExecutorState.UNKNOWN:
-                return JobStatus(status.state, "invalid state")
+                return JobStatus(status.state, f"invalid operation finalize() in state {status.state}")
             
             work_pv = get_work_pv_name(job)
             job_pv = get_job_pv_name(job)
@@ -106,8 +109,11 @@ class K8SJobAPI(JobAPI):
         try:
             # 1. Check the job is in the PREPARED state. If not, return its current state with a message.
             status = self.get_status(job)
+            
+            if status.state in [ExecutorState.EXECUTING, ExecutorState.EXECUTED]:
+                return JobStatus(status.state, f"already in state {status.state}")
             if status.state != ExecutorState.PREPARED:
-                return JobStatus(status.state, "invalid state")
+                return JobStatus(status.state, f"invalid operation finalize() in state {status.state}")
             
             # 2. Validate that the ephememeral workspace created by prepare for this job exists.  If not, return an ERROR state with message.
             job_pvc = get_job_pvc_name(job)
@@ -147,8 +153,11 @@ class K8SJobAPI(JobAPI):
         try:
             # 1. Check the job is in the EXECUTED state. If not, return its current state with a message.
             status = self.get_status(job)
+            
+            if status.state in [ExecutorState.FINALIZING, ExecutorState.FINALIZED]:
+                return JobStatus(status.state, f"already in state {status.state}")
             if status.state != ExecutorState.EXECUTED:
-                return JobStatus(status.state, "invalid state")
+                return JobStatus(status.state, f"invalid operation finalize() in state {status.state}")
             
             # 2. Validate that the job's ephemeral workspace exists. If not, return an ERROR state with message.
             job_pvc = get_job_pvc_name(job)
