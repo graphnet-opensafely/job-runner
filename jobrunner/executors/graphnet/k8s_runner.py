@@ -17,7 +17,7 @@ from kubernetes import client, config as k8s_config
 from jobrunner import config
 from jobrunner.executors.graphnet import config as graphnet_config
 from jobrunner.job_executor import *
-from jobrunner.executors.graphnet.post import JOB_RESULTS_TAG
+from jobrunner.executors.graphnet.container.finalize import JOB_RESULTS_TAG
 
 batch_v1 = client.BatchV1Api()
 core_v1 = client.CoreV1Api()
@@ -404,7 +404,7 @@ def create_opensafely_job(workspace_name, opensafely_job_id, opensafely_job_name
 
 def prepare(prepare_job_name, commit_sha, inputs, job_pvc, private_repo_access_token, repo_url, work_pvc):
     repos_dir = WORK_DIR + "/repos"
-    command = ['python', '-m', 'jobrunner.executors.graphnet.pre']
+    command = ['python', '-m', 'jobrunner.prepare']
     args = [repo_url, commit_sha, repos_dir, JOB_DIR, inputs]
     env = {'PRIVATE_REPO_ACCESS_TOKEN': private_repo_access_token}
     storages = [
@@ -476,7 +476,7 @@ def finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, 
     
     job_metadata_json = json.dumps(job_metadata)
     
-    command = ['python', '-m', 'jobrunner.executors.graphnet.post']
+    command = ['python', '-m', 'jobrunner.finalize']
     args = [JOB_DIR, high_privacy_workspace_dir, high_privacy_metadata_dir, high_privacy_log_dir, high_privacy_action_log_path, medium_privacy_workspace_dir,
             medium_privacy_metadata_dir, execute_logs, output_spec_json, job_metadata_json]
     args = [str(a) for a in args]
