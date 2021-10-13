@@ -8,8 +8,15 @@ import pytest
 from jobrunner import config
 from jobrunner.job_executor import *
 from jobrunner.executors.graphnet.k8s_runner import (
-    init_k8s_config,
     create_opensafely_job,
+    delete_work_files,
+    WORK_DIR,
+    K8SJobAPI,
+    get_work_pv_name,
+    get_job_pv_name
+)
+from jobrunner.executors.graphnet.k8s import (
+    init_k8s_config,
     convert_k8s_name,
     create_k8s_job,
     read_log,
@@ -21,10 +28,7 @@ from jobrunner.executors.graphnet.k8s_runner import (
     read_finalize_output,
     read_image_id,
     JOB_CONTAINER_NAME,
-    delete_work_files,
-    WORK_DIR,
     await_job_status,
-    K8SJobAPI,
 )
 
 
@@ -189,8 +193,8 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     # clean up
     delete_namespace(namespace)
     
-    work_pv = K8SJobAPI._get_work_pv_name(job)
-    job_pv = K8SJobAPI._get_job_pv_name(job)
+    work_pv = get_work_pv_name(job)
+    job_pv = get_job_pv_name(job)
     delete_persistent_volume(work_pv)
     delete_persistent_volume(job_pv)
 
@@ -208,7 +212,7 @@ def test_generate_cohort(monkeypatch):
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_JOB_STORAGE_SIZE", "100M")
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_EXECUTION_HOST_WHITELIST", "127.0.0.1:1433")
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     import configparser
     private_config = configparser.RawConfigParser()
@@ -281,7 +285,7 @@ def test_job_env(monkeypatch):
     
     namespace = "opensafely-test"
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     create_namespace(namespace)
     
@@ -319,7 +323,7 @@ def test_job_env(monkeypatch):
 def test_job_network(monkeypatch):
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_USE_LOCAL_CONFIG", 1)
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     namespace = "opensafely-test"
     create_namespace(namespace)
@@ -387,10 +391,11 @@ def test_job_sequence(monkeypatch):
     storage_class = "standard"
     size = "100M"
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     create_namespace(namespace)
-    create_pv(pv_name, storage_class, size)
+    host_path = {"path": f"/tmp/{str(int(time.time() * 10 ** 6))}"}
+    create_pv(pv_name, storage_class, size, host_path)
     create_pvc(pv_name, pvc_name, storage_class, namespace, size)
     
     jobs = []
@@ -446,7 +451,7 @@ def test_create_concurrent_jobs(monkeypatch):
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_WS_STORAGE_SIZE", "100M")
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_JOB_STORAGE_SIZE", "100M")
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     allow_network_access = True
     execute_job_image = 'busybox'
@@ -504,7 +509,7 @@ def test_create_duplicated_job(monkeypatch):
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_WS_STORAGE_SIZE", "100M")
     monkeypatch.setattr("jobrunner.executors.graphnet.config.GRAPHNET_K8S_JOB_STORAGE_SIZE", "100M")
     
-    init_k8s_config()
+    init_k8s_config(True)
     
     allow_network_access = True
     execute_job_image = 'busybox'
