@@ -13,3 +13,4 @@ docker build -t opensafely-job-runner:latest .
 docker build -t cohortextractor:latest -f ../cohort-extractor/Dockerfile ../cohort-extractor/.
 
 # docker tag cohortextractor:latest ghcr.io/opensafely-core/cohortextractor:latest
+docker build --target job-runner-tools-graphnet -t opensafely-job-runner-tools:latest -f docker/Dockerfile .

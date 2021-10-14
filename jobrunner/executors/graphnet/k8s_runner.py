@@ -371,24 +371,21 @@ def prepare(prepare_job_name, commit_sha, inputs, job_pvc, private_repo_access_t
         (work_pvc, WORK_DIR, False),
         (job_pvc, JOB_DIR, True),
     ]
-    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
     namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
     jobrunner_image = graphnet_config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
-    create_k8s_job(prepare_job_name, namespace, jobrunner_image, command, args, env, storages, {}, image_pull_policy=image_pull_policy)
+    create_k8s_job(prepare_job_name, namespace, jobrunner_image, command, args, env, storages, {})
     return prepare_job_name
 
 
-def execute(execute_job_name, execute_job_arg, execute_job_command, execute_job_env, execute_job_image, job_pvc, network_labels, depends_on=None):
+def execute(execute_job_name, execute_job_arg, execute_job_command, execute_job_env, execute_job_image, job_pvc, network_labels):
     command = execute_job_command
     args = execute_job_arg
     storages = [
         (job_pvc, JOB_DIR, True),
     ]
     env = execute_job_env
-    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
     namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
-    create_k8s_job(execute_job_name, namespace, execute_job_image, command, args, env, storages, network_labels, depends_on=depends_on,
-                   image_pull_policy=image_pull_policy)
+    create_k8s_job(execute_job_name, namespace, execute_job_image, command, args, env, storages, network_labels)
     return execute_job_name
 
 
@@ -445,9 +442,8 @@ def finalize(finalize_job_name, action, execute_job_name, job_pvc, output_spec, 
         (work_pvc, WORK_DIR, False),
         (job_pvc, JOB_DIR, True),
     ]
-    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
     jobrunner_image = graphnet_config.GRAPHNET_K8S_JOB_RUNNER_IMAGE
-    create_k8s_job(finalize_job_name, namespace, jobrunner_image, command, args, env, storages, {}, image_pull_policy=image_pull_policy)
+    create_k8s_job(finalize_job_name, namespace, jobrunner_image, command, args, env, storages, {})
     
     return finalize_job_name
 
@@ -465,8 +461,7 @@ def delete_work_files(workspace, privacy, paths, work_pvc, namespace):
         # pvc, path, is_control
         (work_pvc, WORK_DIR, False)
     ]
-    image_pull_policy = "Never" if graphnet_config.GRAPHNET_K8S_USE_LOCAL_CONFIG else "IfNotPresent"
-    create_k8s_job(job_name, namespace, image, command, args, {}, storage, dict(), image_pull_policy=image_pull_policy)
+    create_k8s_job(job_name, namespace, image, command, args, {}, storage, dict())
     return job_name
 
 
