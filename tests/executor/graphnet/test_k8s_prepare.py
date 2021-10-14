@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from jobrunner.k8s.pre import (
+from jobrunner.executors.graphnet.pre import (
     git_clone_and_checkout,
     copy_input_files
 )

@@ -1,7 +1,7 @@
 import datetime
 from pathlib import Path
 
-from jobrunner.k8s.post import (
+from jobrunner.executors.graphnet.post import (
     finalize
 )
 

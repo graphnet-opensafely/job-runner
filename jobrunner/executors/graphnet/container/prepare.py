@@ -58,6 +58,5 @@ def copy_input_files(inputs, job_dir):
         if len(str(input_path)) > 0:
             shutil.copy(input_path, job_dir)
 
-
 if __name__ == '__main__':
     main()
