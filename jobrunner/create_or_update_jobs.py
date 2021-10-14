@@ -8,17 +8,9 @@ and doing the necessary dependency resolution.
 import logging
 import re
 import time
-from itertools import groupby
-from operator import attrgetter
 
 from jobrunner import config
-from jobrunner.lib.database import (
-    exists_where,
-    find_where,
-    insert,
-    transaction,
-    update_where,
-)
+from jobrunner.lib.database import exists_where, insert, transaction, update_where
 from jobrunner.lib.git import GitError, GitFileNotFoundError, read_file_from_repo
 from jobrunner.lib.github_validators import (
     GithubValidationError,
@@ -33,6 +25,7 @@ from jobrunner.project import (
     get_all_actions,
     parse_and_validate_project_file,
 )
+from jobrunner.queries import calculate_workspace_state
 from jobrunner.reusable_actions import (
     ReusableActionError,
     resolve_reusable_action_references,
@@ -93,7 +86,7 @@ def create_jobs(job_request):
     validate_job_request(job_request)
     project_file = get_project_file(job_request)
     project = parse_and_validate_project_file(project_file)
-    latest_jobs = get_latest_job_for_each_action(job_request.workspace)
+    latest_jobs = get_latest_jobs_for_actions_in_project(job_request.workspace, project)
     new_jobs = get_new_jobs_to_run(job_request, project, latest_jobs)
     assert_new_jobs_created(new_jobs, latest_jobs)
     resolve_reusable_action_references(new_jobs)
@@ -160,21 +153,12 @@ def get_project_file(job_request):
         raise JobRequestError(f"No project.yaml file found in {job_request.repo_url}")
 
 
-def get_latest_job_for_each_action(workspace):
-    """
-    Return a list containing the most recent job (if any) for each action in
-    the workspace
-    """
-    all_jobs = find_where(Job, workspace=workspace)
-    latest_jobs = []
-    for _, jobs in group_by(all_jobs, attrgetter("action")):
-        ordered_jobs = sorted(jobs, key=attrgetter("created_at"), reverse=True)
-        latest_jobs.append(ordered_jobs[0])
-    return latest_jobs
-
-
-def group_by(iterable, key):
-    return groupby(sorted(iterable, key=key), key=key)
+def get_latest_jobs_for_actions_in_project(workspace, project):
+    return [
+        job
+        for job in calculate_workspace_state(workspace)
+        if job.action in get_all_actions(project)
+    ]
 
 
 def get_new_jobs_to_run(job_request, project, current_jobs):
@@ -283,15 +267,33 @@ def job_should_be_rerun(job_request, job):
 
 
 def assert_new_jobs_created(new_jobs, current_jobs):
-    if not new_jobs:
-        # There are two reasons we can end up with no new jobs to run: one is
-        # that the "run all" action was requested but everything has already
-        # run successfully
-        if all(job.state == State.SUCCEEDED for job in current_jobs):
-            raise NothingToDoError()
-        # The other is that every requested action is already running or pending
-        else:
-            raise JobRequestError("All requested actions were already scheduled to run")
+    if new_jobs:
+        return
+
+    pending = [job.action for job in current_jobs if job.state == State.PENDING]
+    running = [job.action for job in current_jobs if job.state == State.RUNNING]
+    succeeded = [job.action for job in current_jobs if job.state == State.SUCCEEDED]
+    failed = [job.action for job in current_jobs if job.state == State.FAILED]
+
+    # There are two legitimate reasons we can end up with no new jobs to run...
+    if len(succeeded) == len(current_jobs):
+        #  ...one is that the "run all" action was requested but everything has already run successfully
+        log.info(
+            f"run_all requested, but all jobs are already successful: {', '.join(succeeded)}"
+        )
+        raise NothingToDoError()
+
+    if len(pending) + len(running) == len(current_jobs):
+        # ...the other is that every requested action is already running or pending, this is considered a user error
+        statuses = ", ".join(f"{job.action}({job.state.name})" for job in current_jobs)
+        log.info(f"All requested actions were already scheduled to run: {statuses}")
+        raise JobRequestError("All requested actions were already scheduled to run")
+
+    # But if we get here then we've somehow failed to schedule new jobs despite the fact that some of the actions we
+    # depend on have failed, which is a bug.
+    raise Exception(
+        f"Unexpected failed jobs in dependency graph after scheduling: {', '.join(failed)}"
+    )
 
 
 def create_failed_job(job_request, exception):
