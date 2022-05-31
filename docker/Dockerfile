@@ -205,10 +205,15 @@ LABEL org.opencontainers.image.revision=$GITREF
 ## changed to root in order to manage the files in the PV in k8s
 USER root
 
+RUN git config --global --add safe.directory '*'
+
 ##################################################
 FROM job-runner-prod as job-runner-graphnet
 
 USER root
+
+RUN git config --global --add safe.directory '*'
+
 #RUN chown appuser: /app && \
 #    chmod u+w /app
 #
