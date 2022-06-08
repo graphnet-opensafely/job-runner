@@ -34,5 +34,5 @@ GRAPHNET_K8S_KEEP_FAILED_JOB = os.environ.get("GRAPHNET_K8S_KEEP_FAILED_JOB", "0
 # the k8s service account to be used by the finalize container to access the logs of the job
 GRAPHNET_K8S_JOB_SERVICE_ACCOUNT = os.environ.get("GRAPHNET_K8S_JOB_SERVICE_ACCOUNT", None)
 
-# use a single pv as the workdir for all the workspace
-GRAPHNET_K8S_USE_SINGLE_WORKDIR_STORAGE = os.environ.get("GRAPHNET_K8S_USE_SINGLE_WORKDIR_STORAGE", "0") == "1"
+# the name of the storage to be used for the workdir
+GRAPHNET_K8S_WORKDIR_STORAGE = os.environ.get("GRAPHNET_K8S_WORKDIR_STORAGE", "job-runner-workdir-pvc")

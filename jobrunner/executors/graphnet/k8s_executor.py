@@ -55,7 +55,7 @@ class K8SExecutorAPI(ExecutorAPI):
             namespace = graphnet_config.GRAPHNET_K8S_NAMESPACE
             k8s.create_namespace(namespace)
             
-            work_pvc = get_work_pvc_name(job)
+            work_pvc = get_work_pvc_name()
             job_pvc = get_job_pvc_name(job)
             
             # 3. Check the resources are available to prepare the job. If not, return the UNKNOWN state with an appropriate message.
@@ -64,10 +64,7 @@ class K8SExecutorAPI(ExecutorAPI):
             job_pv_size = graphnet_config.GRAPHNET_K8S_JOB_STORAGE_SIZE
             if graphnet_config.GRAPHNET_K8S_USE_LOCAL_STORAGE:
                 host_path = {"path": f"/tmp/{str(int(time.time() * 10 ** 6))}"}
-                if graphnet_config.GRAPHNET_K8S_USE_SINGLE_WORKDIR_STORAGE:
-                    work_pv = k8s.convert_k8s_name("opensafely-workdir", "pv")
-                else:
-                    work_pv = k8s.convert_k8s_name(job.workspace, "pv")
+                work_pv = k8s.convert_k8s_name("opensafely-workdir", "pv")
                 
                 job_pv = k8s.convert_k8s_name(job.id, "pv")
                 k8s.create_pv(work_pv, storage_class, ws_pv_size, host_path, get_app_labels())
@@ -165,7 +162,7 @@ class K8SExecutorAPI(ExecutorAPI):
             action = job.action
             execute_job_name = get_execute_job_name(job)
             job_pvc = get_job_pvc_name(job)
-            work_pvc = get_work_pvc_name(job)
+            work_pvc = get_work_pvc_name()
             opensafely_job_id = job.id
             opensafely_job_name = get_opensafely_job_name(job)
             output_spec = job.output_spec
@@ -493,11 +490,8 @@ def get_job_pvc_name(job):
     return k8s.convert_k8s_name(job.id, "pvc")
 
 
-def get_work_pvc_name(job):
-    if graphnet_config.GRAPHNET_K8S_USE_SINGLE_WORKDIR_STORAGE:
-        return k8s.convert_k8s_name("opensafely-workdir", "pvc")
-    else:
-        return k8s.convert_k8s_name(job.workspace, "pvc")
+def get_work_pvc_name():
+    return graphnet_config.GRAPHNET_K8S_WORKDIR_STORAGE
 
 
 def get_opensafely_job_name(job):

@@ -176,7 +176,7 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     assert results.image_id is not None
     
     # check if the file is saved in the work pv
-    work_pvc = get_work_pvc_name(job)
+    work_pvc = get_work_pvc_name()
     result = list_files_in_volume(namespace, work_pvc, WORK_DIR)
     for r in result:
         print(r)
@@ -192,7 +192,7 @@ def test_generate_cohort_with_JobAPI(monkeypatch):
     job_api.cleanup(job)
     
     # clean up
-    work_pv = k8s.read_pv_name(namespace, get_work_pvc_name(job))
+    work_pv = k8s.read_pv_name(namespace, get_work_pvc_name())
     job_pv = k8s.read_pv_name(namespace, get_job_pvc_name(job))
     
     delete_namespace(namespace)
