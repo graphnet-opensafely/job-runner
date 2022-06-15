@@ -2,13 +2,14 @@
 Script which polls the job-server endpoint for active JobRequests and POSTs
 back any associated Jobs.
 """
+import json
 import logging
 import sys
 import time
 
 import requests
 
-from jobrunner import config
+from jobrunner import config, queries
 from jobrunner.create_or_update_jobs import create_or_update_jobs
 from jobrunner.lib.database import find_where
 from jobrunner.lib.log_utils import configure_logging, set_log_context
@@ -66,12 +67,21 @@ def api_post(*args, **kwargs):
     return api_request("post", *args, **kwargs)
 
 
-def api_request(method, path, *args, **kwargs):
+def api_request(method, path, *args, headers=None, **kwargs):
+    if headers is None:
+        headers = {}
+
     url = "{}/{}/".format(config.JOB_SERVER_ENDPOINT.rstrip("/"), path.strip("/"))
-    # We could do this just once on import, but it makes changing the config in
-    # tests more fiddly
-    session.headers = {"Authorization": config.JOB_SERVER_TOKEN}
-    response = session.request(method, url, *args, **kwargs)
+
+    flags = {
+        f.id: {"v": f.value, "ts": f.timestamp_isoformat}
+        for f in queries.get_current_flags()
+    }
+
+    headers["Authorization"] = config.JOB_SERVER_TOKEN
+    headers["Flags"] = json.dumps(flags, separators=(",", ":"))
+
+    response = session.request(method, url, *args, headers=headers, **kwargs)
 
     log.debug(
         "%s %s %s post_data=%s %s"

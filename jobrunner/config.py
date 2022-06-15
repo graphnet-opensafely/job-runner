@@ -15,33 +15,14 @@ def _is_valid_backend_name(name):
 
 default_work_dir = Path(__file__) / "../../workdir"
 
+
 WORKDIR = Path(os.environ.get("WORKDIR", default_work_dir)).resolve()
-
-TMP_DIR = WORKDIR / "temp"
-
-GIT_REPO_DIR = WORKDIR / "repos"
-
 DATABASE_FILE = WORKDIR / "db.sqlite"
-
-HIGH_PRIVACY_STORAGE_BASE = Path(
-    os.environ.get("HIGH_PRIVACY_STORAGE_BASE", WORKDIR / "high_privacy")
-)
-MEDIUM_PRIVACY_STORAGE_BASE = Path(
-    os.environ.get("MEDIUM_PRIVACY_STORAGE_BASE", WORKDIR / "medium_privacy")
-)
-
-HIGH_PRIVACY_WORKSPACES_DIR = HIGH_PRIVACY_STORAGE_BASE / "workspaces"
-MEDIUM_PRIVACY_WORKSPACES_DIR = MEDIUM_PRIVACY_STORAGE_BASE / "workspaces"
-
-HIGH_PRIVACY_ARCHIVE_DIR = Path(
-    os.environ.get("HIGH_PRIVACY_ARCHIVE_DIR", HIGH_PRIVACY_STORAGE_BASE / "archives")
-)
+GIT_REPO_DIR = WORKDIR / "repos"
 
 # valid archive formats
 ARCHIVE_FORMATS = (".tar.gz", ".tar.zstd", ".tar.xz")
 
-
-JOB_LOG_DIR = HIGH_PRIVACY_STORAGE_BASE / "logs"
 
 JOB_SERVER_ENDPOINT = os.environ.get(
     "JOB_SERVER_ENDPOINT", "https://jobs.opensafely.org/api/v2/"
@@ -123,11 +104,6 @@ MAX_WORKERS = int(os.environ.get("MAX_WORKERS") or max(cpu_count() - 1, 1))
 # locally
 RANDOMISE_JOB_ORDER = True
 
-# Automatically delete containers and volumes after they have been used
-CLEAN_UP_DOCKER_OBJECTS = True
-
-# See `manage_jobs.ensure_overwritable` for more detail
-ENABLE_PERMISSIONS_WORKAROUND = bool(os.environ.get("ENABLE_PERMISSIONS_WORKAROUND"))
 
 STATA_LICENSE = os.environ.get("STATA_LICENSE")
 STATA_LICENSE_REPO = os.environ.get(
@@ -186,11 +162,16 @@ if STATS_DATABASE_FILE:
     STATS_DATABASE_FILE = Path(STATS_DATABASE_FILE)
 
 STATS_POLL_INTERVAL = float(os.environ.get("STATS_POLL_INTERVAL", "10"))
-
-
-# feature flag to enable new API abstraction
-EXECUTION_API = os.environ.get("EXECUTION_API", "true").lower() == "true"
-EXECUTOR = os.environ.get("EXECUTOR", "jobrunner.executors.local:LocalDockerAPI")
+MAINTENANCE_POLL_INTERVAL = float(
+    os.environ.get("MAINTENANCE_POLL_INTERVAL", "300")
+)  # 5 min
+ENABLE_MAINTENANCE_MODE_THREAD = os.environ.get(
+    "ENABLE_MAINTENANCE_MODE_THREAD", ""
+).lower() in (
+    "true",
+    "yes",
+    "on",
+)
 
 
 # Map known exit codes to user-friendly messages
@@ -204,8 +185,55 @@ DATABASE_EXIT_CODES = {
     4: "New data is being imported into the database, please try again in a few hours",
     5: "Something went wrong with the database, please contact tech support",
 }
-EXIT_CODES = {
+
+
+DEFAULT_JOB_CPU_COUNT = float(os.environ.get("DEFAULT_JOB_CPU_COUNT", 2))
+DEFAULT_JOB_MEMORY_LIMIT = os.environ.get("DEFAULT_JOB_MEMORY_LIMIT", "4G")
+
+
+EXECUTOR = os.environ.get("EXECUTOR", "jobrunner.executors.local:LocalDockerAPI")
+
+# LocalDockerAPI executor specific configuration
+# Note: the local backend also reuses the main GIT_REPO_DIR config
+
+LOCAL_VOLUME_API = os.environ.get(
+    "LOCAL_VOLUME_API", "jobrunner.executors.volumes:DockerVolumeAPI"
+)
+
+HIGH_PRIVACY_STORAGE_BASE = Path(
+    os.environ.get("HIGH_PRIVACY_STORAGE_BASE", WORKDIR / "high_privacy")
+)
+MEDIUM_PRIVACY_STORAGE_BASE = Path(
+    os.environ.get("MEDIUM_PRIVACY_STORAGE_BASE", WORKDIR / "medium_privacy")
+)
+
+HIGH_PRIVACY_WORKSPACES_DIR = HIGH_PRIVACY_STORAGE_BASE / "workspaces"
+MEDIUM_PRIVACY_WORKSPACES_DIR = MEDIUM_PRIVACY_STORAGE_BASE / "workspaces"
+JOB_LOG_DIR = HIGH_PRIVACY_STORAGE_BASE / "logs"
+HIGH_PRIVACY_ARCHIVE_DIR = Path(
+    os.environ.get("HIGH_PRIVACY_ARCHIVE_DIR", HIGH_PRIVACY_STORAGE_BASE / "archives")
+)
+
+# Automatically delete containers and volumes after they have been used
+CLEAN_UP_DOCKER_OBJECTS = True
+
+# use to checkout the repo
+TMP_DIR = WORKDIR / "temp"
+
+# docker specific exit codes we understand
+DOCKER_EXIT_CODES = {
     # 137 = 128+9, which means was killed by signal 9, SIGKILL
-    # This usually happens because of OOM killer, or else manually
-    137: "Killed: out of memory, or stopped by admin",
+    # Note: this can also mean killed by OOM killer, but that's explicitly
+    # handled already.
+    137: "Killed by an OpenSAFELY admin",
 }
+
+# BindMountVolumeAPI config
+#
+# used to store directories to be mounted into jobs with the BindMountVolumeAPI
+HIGH_PRIVACY_VOLUME_DIR = HIGH_PRIVACY_STORAGE_BASE / "volumes"
+
+# when running inside a docker container and using the BindMountVolumeAPI, this
+# needs to point to the path to the HIGH_PRIVACY_VOLUME_DIR from the *hosts*
+# perspective, as that's what docker will be looking for.
+DOCKER_HOST_VOLUME_DIR = os.environ.get("DOCKER_HOST_VOLUME_DIR")

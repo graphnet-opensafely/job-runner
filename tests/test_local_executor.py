@@ -3,23 +3,26 @@ import time
 import pytest
 
 from jobrunner import config
-from jobrunner.executors import local
+from jobrunner.executors import local, volumes
 from jobrunner.job_executor import ExecutorState, JobDefinition, Privacy, Study
 from jobrunner.lib import docker
-from jobrunner.manage_jobs import (
-    container_name,
-    get_high_privacy_workspace,
-    get_medium_privacy_workspace,
-)
 from tests.factories import ensure_docker_images_present
+
+
+# this is parametized fixture, and test using it will run multiple times, once
+# for each volume api implementation
+@pytest.fixture(params=[volumes.BindMountVolumeAPI, volumes.DockerVolumeAPI])
+def volume_api(request, monkeypatch):
+    monkeypatch.setattr(local, "volume_api", request.param)
+    return request.param
 
 
 def populate_workspace(workspace, filename, content=None, privacy="high"):
     assert privacy in ("high", "medium")
     if privacy == "high":
-        path = get_high_privacy_workspace(workspace) / filename
+        path = local.get_high_privacy_workspace(workspace) / filename
     else:
-        path = get_medium_privacy_workspace(workspace) / filename
+        path = local.get_medium_privacy_workspace(workspace) / filename
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content or filename)
@@ -29,8 +32,9 @@ def populate_workspace(workspace, filename, content=None, privacy="high"):
 # used for tests and debugging
 def get_log(job):
     result = docker.docker(
-        ["container", "logs", container_name(job)],
+        ["container", "logs", local.container_name(job)],
         check=True,
+        text=True,
         capture_output=True,
     )
     return result.stdout + result.stderr
@@ -53,15 +57,8 @@ def list_repo_files(path):
     return list(str(f.relative_to(path)) for f in path.glob("**/*") if f.is_file())
 
 
-@pytest.fixture
-def use_api(monkeypatch):
-    monkeypatch.setattr(config, "EXECUTION_API", True)
-    yield
-    local.RESULTS.clear()
-
-
 @pytest.mark.needs_docker
-def test_prepare_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_prepare_success(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -75,7 +72,10 @@ def test_prepare_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
         args=["/usr/bin/true"],
         env={},
         inputs=["output/input.csv"],
-        output_spec={},
+        output_spec={
+            "*": "medium",
+            "**/*": "medium",
+        },
         allow_database_access=False,
     )
 
@@ -89,8 +89,7 @@ def test_prepare_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
     # we don't need to wait for this is currently synchronous
     assert api.get_status(job).state == ExecutorState.PREPARED
 
-    volume = local.volume_name(job)
-    assert docker.volume_exists(volume)
+    assert volume_api.volume_exists(job)
 
     # check files have been copied
     expected = set(list_repo_files(test_repo.source) + job.inputs)
@@ -98,13 +97,13 @@ def test_prepare_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
 
     # glob_volume_files uses find, and its '**/*' regex doesn't find files in
     # the root dir, which is arguably correct.
-    files = docker.glob_volume_files(volume, ["*", "**/*"])
+    files = volume_api.glob_volume_files(job)
     all_files = set(files["*"] + files["**/*"])
     assert all_files == expected
 
 
 @pytest.mark.needs_docker
-def test_prepare_already_prepared(use_api, docker_cleanup, test_repo):
+def test_prepare_already_prepared(docker_cleanup, test_repo, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -123,7 +122,7 @@ def test_prepare_already_prepared(use_api, docker_cleanup, test_repo):
     )
 
     # create the volume already
-    docker.create_volume(local.volume_name(job))
+    volume_api.create_volume(job)
 
     api = local.LocalDockerAPI()
     status = api.prepare(job)
@@ -132,7 +131,7 @@ def test_prepare_already_prepared(use_api, docker_cleanup, test_repo):
 
 
 @pytest.mark.needs_docker
-def test_prepare_no_image(use_api, docker_cleanup, test_repo):
+def test_prepare_no_image(docker_cleanup, test_repo, volume_api):
     job = JobDefinition(
         id="test_prepare_no_image",
         job_request_id="test_request_id",
@@ -156,7 +155,7 @@ def test_prepare_no_image(use_api, docker_cleanup, test_repo):
 
 
 @pytest.mark.parametrize("ext", config.ARCHIVE_FORMATS)
-def test_prepare_archived(ext, use_api, test_repo):
+def test_prepare_archived(ext, test_repo):
     job = JobDefinition(
         id="test_prepare_archived",
         job_request_id="test_request_id",
@@ -183,7 +182,7 @@ def test_prepare_archived(ext, use_api, test_repo):
 
 
 @pytest.mark.needs_docker
-def test_prepare_job_bad_commit(use_api, docker_cleanup, test_repo):
+def test_prepare_job_bad_commit(docker_cleanup, test_repo):
     job = JobDefinition(
         id="test_prepare_job_bad_commit",
         job_request_id="test_request_id",
@@ -206,7 +205,7 @@ def test_prepare_job_bad_commit(use_api, docker_cleanup, test_repo):
 
 
 @pytest.mark.needs_docker
-def test_prepare_job_no_input_file(use_api, docker_cleanup, test_repo):
+def test_prepare_job_no_input_file(docker_cleanup, test_repo, volume_api):
     job = JobDefinition(
         id="test_prepare_job_no_input_file",
         job_request_id="test_request_id",
@@ -229,7 +228,7 @@ def test_prepare_job_no_input_file(use_api, docker_cleanup, test_repo):
 
 
 @pytest.mark.needs_docker
-def test_execute_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_execute_success(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -245,6 +244,8 @@ def test_execute_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
         inputs=["output/input.csv"],
         output_spec={},
         allow_database_access=False,
+        cpu_count=1.5,
+        memory_limit="1G",
     )
 
     populate_workspace(job.workspace, "output/input.csv")
@@ -264,9 +265,13 @@ def test_execute_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
         ExecutorState.EXECUTED,
     )
 
+    container_data = docker.container_inspect(local.container_name(job), "HostConfig")
+    assert container_data["NanoCpus"] == int(1.5 * 1e9)
+    assert container_data["Memory"] == 2**30  # 1G
+
 
 @pytest.mark.needs_docker
-def test_execute_not_prepared(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_execute_not_prepared(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -292,11 +297,11 @@ def test_execute_not_prepared(use_api, docker_cleanup, test_repo, tmp_work_dir):
 
 
 @pytest.mark.needs_docker
-def test_finalize_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_finalize_success(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
-        id="test_finalize_finalized",
+        id="test_finalize_success",
         job_request_id="test_request_id",
         study=test_repo.study,
         workspace="test",
@@ -343,7 +348,7 @@ def test_finalize_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
 
 
 @pytest.mark.needs_docker
-def test_finalize_failed(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_finalize_failed(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -391,7 +396,7 @@ def test_finalize_failed(use_api, docker_cleanup, test_repo, tmp_work_dir):
 
 
 @pytest.mark.needs_docker
-def test_finalize_unmatched(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_finalize_unmatched(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -402,7 +407,8 @@ def test_finalize_unmatched(use_api, docker_cleanup, test_repo, tmp_work_dir):
         action="action",
         created_at=int(time.time()),
         image="ghcr.io/opensafely-core/busybox",
-        args=["true"],
+        # the sleep is needed to make sure the unmatched file is *newer* enough
+        args=["sh", "-c", "sleep 1; touch /workspace/unmatched"],
         env={},
         inputs=["output/input.csv"],
         output_spec={
@@ -436,10 +442,11 @@ def test_finalize_unmatched(use_api, docker_cleanup, test_repo, tmp_work_dir):
     assert results.exit_code == 0
     assert results.outputs == {}
     assert results.unmatched_patterns == ["output/output.*", "output/summary.*"]
+    assert results.unmatched_outputs == ["unmatched"]
 
 
 @pytest.mark.needs_docker
-def test_finalize_failed_137(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_finalize_failed_137(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -469,8 +476,8 @@ def test_finalize_failed_137(use_api, docker_cleanup, test_repo, tmp_work_dir):
     status = api.execute(job)
     assert status.state == ExecutorState.EXECUTING
 
-    # impersonate the OOM
-    docker.kill(container_name(job))
+    # impersonate an admin
+    docker.kill(local.container_name(job))
 
     wait_for_state(api, job, ExecutorState.EXECUTED)
 
@@ -480,64 +487,34 @@ def test_finalize_failed_137(use_api, docker_cleanup, test_repo, tmp_work_dir):
     # we don't need to wait
     assert api.get_status(job).state == ExecutorState.FINALIZED
     assert job.id in local.RESULTS
-    assert local.RESULTS[job.id].message == "Killed: out of memory, or stopped by admin"
+    assert local.RESULTS[job.id].exit_code == 137
+    assert local.RESULTS[job.id].message == "Killed by an OpenSAFELY admin"
 
 
 @pytest.mark.needs_docker
-@pytest.mark.parametrize(
-    "exit_code,db_access_allowed,expected_message",
-    [
-        (
-            3,
-            True,
-            (
-                "A transient database error occurred, your job may run "
-                "if you try it again, if it keeps failing then contact tech support"
-            ),
-        ),
-        (
-            4,
-            True,
-            "New data is being imported into the database, please try again in a few hours",
-        ),
-        (
-            5,
-            True,
-            "Something went wrong with the database, please contact tech support",
-        ),
-        # the same exit codes for a job that doesn't have access to the database show no message
-        (3, False, None),
-        (4, False, None),
-        (5, False, None),
-    ],
-)
-def test_finalize_failed_db_exit_codes(
-    use_api,
-    docker_cleanup,
-    test_repo,
-    tmp_work_dir,
-    exit_code,
-    db_access_allowed,
-    expected_message,
-):
+def test_finalize_failed_oomkilled(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
-        id=f"test_finalize_failed_{exit_code}",
+        id="test_finalize_failed",
         job_request_id="test_request_id",
         study=test_repo.study,
         workspace="test",
         action="action",
         created_at=int(time.time()),
         image="ghcr.io/opensafely-core/busybox",
-        args=["sh", "-c", f"exit {exit_code}"],
+        # Consume memory by writing to the tmpfs at /dev/shm
+        # We write a lot more that our limit, to ensure the OOM killer kicks in
+        # regardless of our tests host's vm.overcommit_memory settings.
+        args=["sh", "-c", "head -c 100m /dev/urandom >/dev/shm/foo"],
         env={},
         inputs=["output/input.csv"],
         output_spec={
             "output/output.*": "high_privacy",
             "output/summary.*": "medium_privacy",
         },
-        allow_database_access=db_access_allowed,
+        allow_database_access=False,
+        memory_limit="6M",  # lowest allowable limit
     )
 
     populate_workspace(job.workspace, "output/input.csv")
@@ -550,13 +527,23 @@ def test_finalize_failed_db_exit_codes(
     assert status.state == ExecutorState.EXECUTING
 
     wait_for_state(api, job, ExecutorState.EXECUTED)
-    status = api.finalize(job)
 
-    assert local.RESULTS[job.id].message == expected_message
+    status = api.finalize(job)
+    assert status.state == ExecutorState.FINALIZING
+
+    # we don't need to wait
+    assert api.get_status(job).state == ExecutorState.FINALIZED
+    assert job.id in local.RESULTS
+    assert local.RESULTS[job.id].exit_code == 137
+    # Note, 6MB is rounded to 0.01GBM by the formatter
+    assert (
+        local.RESULTS[job.id].message
+        == "Ran out of memory (limit for this job was 0.01GB)"
+    )
 
 
 @pytest.mark.needs_docker
-def test_cleanup_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
+def test_cleanup_success(docker_cleanup, test_repo, tmp_work_dir, volume_api):
     ensure_docker_images_present("busybox")
 
     job = JobDefinition(
@@ -580,9 +567,8 @@ def test_cleanup_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
     api.prepare(job)
     api.execute(job)
 
-    volume = local.volume_name(job)
     container = local.container_name(job)
-    assert docker.volume_exists(volume)
+    assert volume_api.volume_exists(job)
     assert docker.container_exists(container)
 
     status = api.cleanup(job)
@@ -591,7 +577,7 @@ def test_cleanup_success(use_api, docker_cleanup, test_repo, tmp_work_dir):
     status = api.get_status(job)
     assert status.state == ExecutorState.UNKNOWN
 
-    assert not docker.volume_exists(volume)
+    assert not volume_api.volume_exists(job)
     assert not docker.container_exists(container)
 
 

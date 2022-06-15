@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 import shutil
@@ -8,29 +7,23 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pipeline import load_pipeline
 
 from jobrunner import config
+from jobrunner.actions import get_action_specification
 from jobrunner.cli import local_run
 from jobrunner.lib import database
 from jobrunner.lib.subprocess_utils import subprocess_run
-from jobrunner.manage_jobs import MANIFEST_FILE, METADATA_DIR
 from jobrunner.models import Job, SavedJobRequest, State
-from jobrunner.project import get_action_specification, parse_and_validate_project_file
 
 
 FIXTURE_DIR = Path(__file__).parents[1].resolve() / "fixtures"
 
 
-@pytest.fixture
-def use_api(request, monkeypatch):
-    monkeypatch.setattr(config, "EXECUTION_API", request.param)
-
-
-@pytest.mark.parametrize("use_api", [True, False], indirect=True)
 @pytest.mark.parametrize("extraction_tool", ["cohortextractor", "databuilder"])
 @pytest.mark.slow_test
 @pytest.mark.needs_docker
-def test_local_run_success(use_api, extraction_tool, tmp_path, docker_cleanup):
+def test_local_run_success(extraction_tool, tmp_path, docker_cleanup):
     project_dir = tmp_path / "project"
     shutil.copytree(str(FIXTURE_DIR / "full_project"), project_dir)
 
@@ -73,30 +66,6 @@ def test_local_run_stata(tmp_path, monkeypatch, docker_cleanup):
 
 @pytest.mark.slow_test
 @pytest.mark.needs_docker
-def test_local_run_triggers_a_manifest_migration(tmp_path, docker_cleanup):
-    project_dir = tmp_path / "project"
-    shutil.copytree(str(FIXTURE_DIR / "full_project"), project_dir)
-
-    # This action doesn't exist in the project.yaml, but the migration doesn't care. We use this instead of an action
-    # that does exist so that it's unambiguous that the database record had been created by the migration rather than
-    # as a side-effect of running the action we specify.
-    manifest = {
-        "workspace": "the-workspace",
-        "repo": "the-repo-url",
-        "actions": {"the-action": {"job_id": "job-id-from-manifest"}},
-        "files": {},
-    }
-    manifest_file = project_dir / METADATA_DIR / MANIFEST_FILE
-    manifest_file.parent.mkdir(parents=True)
-    manifest_file.write_text(json.dumps(manifest))
-
-    local_run.main(project_dir=project_dir, actions=["generate_cohort"])
-
-    assert database.exists_where(Job, id="job-id-from-manifest")
-
-
-@pytest.mark.slow_test
-@pytest.mark.needs_docker
 @pytest.mark.parametrize("extraction_tool", ["cohortextractor", "databuilder"])
 def test_local_run_copes_with_detritus_of_earlier_interrupted_run(
     extraction_tool, tmp_path
@@ -109,13 +78,15 @@ def test_local_run_copes_with_detritus_of_earlier_interrupted_run(
     shutil.copytree(str(FIXTURE_DIR / "full_project"), project_dir)
     config.DATABASE_FILE = project_dir / "metadata" / "db.sqlite"
 
-    project = parse_and_validate_project_file(
-        (project_dir / "project.yaml").read_bytes()
-    )
+    project = load_pipeline(project_dir / "project.yaml")
     database.insert(SavedJobRequest(id="previous-request", original={}))
 
     def job(job_id, action, state):
-        spec = get_action_specification(project, action)
+        spec = get_action_specification(
+            project,
+            action,
+            using_dummy_data_backend=config.USING_DUMMY_DATA_BACKEND,
+        )
         return Job(
             id=job_id,
             job_request_id="previous-request",
