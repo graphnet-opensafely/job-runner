@@ -304,7 +304,6 @@ def handle_job_api(job, api, mode=None):
         new_status = initial_status
 
     # following logic is common to all non-final transitions
-
     if new_status.state == ExecutorState.ERROR:
         # all transitions can go straight to error
         mark_job_as_failed(job, new_status.message)
